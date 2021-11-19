@@ -1,0 +1,21 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#app {
+  overflow: hidden;
+}
+
+.annotation {
+  background-color: white;
+  box-shadow: 0px 0px 5px #333;
+  transition: background-color 0.1s ease-in-out;
+}
+
+.annotation:hover {
+  background-color: #bbb;
+  cursor: pointer;
+}

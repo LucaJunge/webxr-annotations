@@ -73,12 +73,13 @@ function init() {
 
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(
-    70,
+    60,
     window.innerWidth / window.innerHeight,
     0.01,
     10000
   );
   camera.position.set(0, 0, 3);
+  //camera.matrixAutoUpdate = false;
 
   const light = new THREE.AmbientLight(0xffffff, 1);
   //light.position.set(0.5, 1, 0.25);
@@ -176,11 +177,9 @@ function createAnnotation(position) {
 
   annotation3D.updatePosition = function () {
     const vector = new THREE.Vector3();
-    //projectedVector = vector;
-    const canvas = renderer.domElement;
-    //vector.copy(this.position);
     this.getWorldPosition(vector);
-    camera.updateMatrixWorld(); // this is it
+
+    const canvas = renderer.domElement;
 
     vector.project(camera);
 
@@ -202,7 +201,7 @@ function createAnnotation(position) {
   return annotation3D;
 }
 
-function createSphere(position = { x: 0, y: 0, z: 0 }, color = 0xffffff) {
+function createSphere(position = { x: 0, y: 0, z: 0 }, color = 0xbb0000) {
   let geometry = new THREE.SphereBufferGeometry(0.02, 16, 16);
   let material = new THREE.MeshBasicMaterial({
     color: color,
@@ -235,6 +234,8 @@ function setupAR() {
 
 async function onSessionStarted(session) {
   session.addEventListener("end", onSessionEnded);
+  // can i update the camera matrix world just once here and not every frame?
+  //camera.updateMatrixWorld();
   renderer.xr.setReferenceSpaceType("local");
   await renderer.xr.setSession(session);
   currentSession = session;
@@ -261,9 +262,9 @@ function render(timestamp, frame) {
   controls.update();
   renderer.render(scene, camera);
   for (let annotation of annotations) {
+    camera.updateMatrixWorld(); // this is it
     annotation.updatePosition();
   }
-
   if (frame) {
     movables.visible = false;
     const referenceSpace = renderer.xr.getReferenceSpace();

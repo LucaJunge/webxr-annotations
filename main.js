@@ -1,11 +1,13 @@
 import "./style.css";
 import * as THREE from "three";
 import { ArcballControls } from "three/examples/jsm/controls/ArcballControls";
+import { radToDeg } from "three/src/math/MathUtils";
 
 let container;
-let camera, scene, renderer;
+let camera, scene, renderer, canvas;
 let controls, controller;
 let box;
+let debugLog;
 
 let reticle;
 let hitTestSource = null;
@@ -55,6 +57,12 @@ let positions = [
   },
 ];
 let currentSession = null;
+let cameraVector = new THREE.Vector3();
+let annotationPositionVector = new THREE.Vector3();
+let arOffset = 0.05;
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
 let sessionInit = {
   optionalFeatures: ["dom-overlay"],
@@ -79,10 +87,8 @@ function init() {
     10000
   );
   camera.position.set(0, 0, 3);
-  //camera.matrixAutoUpdate = false;
 
   const light = new THREE.AmbientLight(0xffffff, 1);
-  //light.position.set(0.5, 1, 0.25);
   scene.add(light);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -91,6 +97,7 @@ function init() {
   renderer.xr.enabled = true;
   controls = new ArcballControls(camera, renderer.domElement, scene);
   container.appendChild(renderer.domElement);
+  canvas = renderer.domElement;
 
   const geometry = new THREE.BoxBufferGeometry(0.5, 0.5, 0.5);
   const material = new THREE.MeshNormalMaterial({
@@ -100,12 +107,10 @@ function init() {
   });
   box = new THREE.Mesh(geometry, material);
   box.name = "box";
-  //scene.add(box);
   movables.add(box);
 
   let axesHelper = new THREE.AxesHelper(3);
   axesHelper.name = "axesHelper";
-  //scene.add(axesHelper);
   movables.add(axesHelper);
 
   controller = renderer.xr.getController(0);
@@ -121,14 +126,18 @@ function init() {
   scene.add(reticle);
 
   window.addEventListener("resize", onWindowResize);
+  window.addEventListener("mousemove", onMouseMove, false);
 
   //debug scale
-  /*scale = document.createElement("div");
-  scale.style.position = "absolute";
-  scale.style.top = "5px";
-  scale.style.left = "5px";
-  scale.innerHTML = "TEXT";
-  document.querySelector("#annotations").appendChild(scale);*/
+  debugLog = document.createElement("div");
+  debugLog.style.position = "absolute";
+  debugLog.style.top = "5px";
+  debugLog.style.left = "5px";
+  debugLog.innerHTML = "DEBUG";
+  debugLog.style.fontFamily = "monospace";
+  debugLog.style.fontSize = "2em";
+  debugLog.style.fontWeight = "bold";
+  document.querySelector("#annotations").appendChild(debugLog);
 
   //let annotation = createAnnotation({ x: 0.25, y: 0.25, z: 0.25 });
   //annotations.push(annotation);
@@ -142,18 +151,35 @@ function init() {
     annotations.push(annotation);
   }
 
+  /*let testAnnotation = createAnnotation({
+    x: 0.25,
+    y: 0.25 + 0.05,
+    z: 0.25,
+  });
+  testAnnotation.name = "testannotation";
+  annotations.push(testAnnotation);*/
+
   scene.add(movables);
   console.log(movables);
 }
 
 function onSelect() {
   if (reticle.visible) {
+    movables.visible = true;
     movables.position.setFromMatrixPosition(reticle.matrix);
   }
 }
 
 function randomNumber(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function onMouseMove(event) {
+  // calculate mouse position in normalized device coordinates
+  // (-1 to +1) for both components
+
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 }
 
 function createAnnotation(position) {
@@ -163,8 +189,11 @@ function createAnnotation(position) {
   DOMannotation.style.width = "24px";
   DOMannotation.style.height = "24px";
   DOMannotation.style.borderRadius = "50%";
+  DOMannotation.style.boxSizing = "border-box";
   DOMannotation.style.border = "2px solid #ddd";
+  //DOMannotation.style.padding = "4px";
   DOMannotation.style.opacity = 1.0;
+  //DOMannotation.innerText = "Hello";
   DOMannotation.style.position = "absolute";
   /*DOMannotation.addEventListener("click", () => {
     console.log("onclick")
@@ -176,24 +205,24 @@ function createAnnotation(position) {
   annotation3D.domElement = DOMannotation;
 
   annotation3D.updatePosition = function () {
-    const vector = new THREE.Vector3();
-    this.getWorldPosition(vector);
+    annotation3D.updateWorldMatrix(true, false);
+    annotation3D.getWorldPosition(annotationPositionVector);
+    annotationPositionVector.project(camera);
 
-    const canvas = renderer.domElement;
+    let x =
+      (0.5 + annotationPositionVector.x / 2) *
+      (canvas.width / window.devicePixelRatio);
 
-    vector.project(camera);
+    let y =
+      (0.5 - annotationPositionVector.y / 2) *
+      (canvas.height / window.devicePixelRatio); // the formula Math.min(devicePixelratio, 2) makes problems on mobile devices
 
-    vector.x = Math.round(
-      (0.5 + vector.x / 2) * (canvas.width / window.devicePixelRatio)
-    );
+    // move the annotation on the screen with top/left
+    //DOMannotation.style.top = `${vector.y - 24}px`;
+    //DOMannotation.style.left = `${vector.x - 12}px`;
 
-    vector.y = Math.round(
-      (0.5 - vector.y / 2) * (canvas.height / window.devicePixelRatio) // the formula Math.min(devicePixelratio, 2) makes problems on mobile devices
-    );
-
-    // move the annotation on the screen
-    DOMannotation.style.top = `${vector.y - 12}px`;
-    DOMannotation.style.left = `${vector.x - 12}px`;
+    // move the annotation on the screen with transform
+    DOMannotation.style.transform = `translate(${x - 12}px, ${y - 12}px)`;
   };
 
   //scene.add(annotation3D);
@@ -234,9 +263,11 @@ function setupAR() {
 
 async function onSessionStarted(session) {
   session.addEventListener("end", onSessionEnded);
-  // can i update the camera matrix world just once here and not every frame?
-  //camera.updateMatrixWorld();
   renderer.xr.setReferenceSpaceType("local");
+
+  // hide objects to place at start (so they are not in the camera)
+  movables.visible = false;
+  reticle.visible = false;
   await renderer.xr.setSession(session);
   currentSession = session;
 }
@@ -259,14 +290,30 @@ function animate() {
 }
 
 function render(timestamp, frame) {
-  controls.update();
+  //controls.update();
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(annotations, true);
+  for (let i = 0; i < intersects.length; i++) {
+    intersects[i].object.material.color.set(0x0000ff);
+  }
+
   renderer.render(scene, camera);
+
+  let xrCamera = renderer.xr.getCamera(camera);
+  xrCamera.getWorldDirection(cameraVector);
+  debugLog.innerText =
+    radToDeg(camera.rotation.z).toFixed(4) +
+    "° rotation Z, " +
+    annotationPositionVector.x +
+    ", " +
+    annotationPositionVector.y;
+
   for (let annotation of annotations) {
     camera.updateMatrixWorld(); // this is it
     annotation.updatePosition();
   }
+
   if (frame) {
-    movables.visible = false;
     const referenceSpace = renderer.xr.getReferenceSpace();
     const session = renderer.xr.getSession();
 
@@ -293,8 +340,8 @@ function render(timestamp, frame) {
         const hit = hitTestResults[0];
 
         reticle.visible = true;
-        movables.visible = true;
-        movables.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+        //movables.visible = true;
+        //movables.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
       } else {
         reticle.visible = false;

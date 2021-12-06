@@ -12,6 +12,7 @@ let debugLog;
 let reticle;
 let hitTestSource = null;
 let hitTestSourceRequested = false;
+let arrow = null;
 let annotations = [];
 let movables = new THREE.Group();
 let positions = [
@@ -62,7 +63,7 @@ let annotationPositionVector = new THREE.Vector3();
 let arOffset = 0.05;
 
 const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+const mouse = new THREE.Vector2(-1, -1);
 
 let sessionInit = {
   optionalFeatures: ["dom-overlay"],
@@ -81,7 +82,7 @@ function init() {
 
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(
-    60,
+    50,
     window.innerWidth / window.innerHeight,
     0.01,
     10000
@@ -92,7 +93,7 @@ function init() {
   scene.add(light);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
   controls = new ArcballControls(camera, renderer.domElement, scene);
@@ -116,6 +117,14 @@ function init() {
   controller = renderer.xr.getController(0);
   controller.addEventListener("select", onSelect);
   scene.add(controller);
+
+  arrow = new THREE.ArrowHelper(
+    raycaster.ray.direction,
+    raycaster.ray.origin,
+    100,
+    Math.random() * 0xffffff
+  );
+  scene.add(arrow);
 
   reticle = new THREE.Mesh(
     new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
@@ -160,7 +169,7 @@ function init() {
   annotations.push(testAnnotation);*/
 
   scene.add(movables);
-  console.log(movables);
+  //console.log(movables);
 }
 
 function onSelect() {
@@ -178,8 +187,15 @@ function onMouseMove(event) {
   // calculate mouse position in normalized device coordinates
   // (-1 to +1) for both components
 
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  // my approach
+  //mouse.x = (event.offsetX / canvas.clientWidth) * 2 - 1;
+  //mouse.y = -(event.offsetY / canvas.clientHeight) * 2 + 1;
+
+  // https://stackoverflow.com/questions/13542175/three-js-ray-intersect-fails-by-adding-div/13544277#13544277
+  var rect = renderer.domElement.getBoundingClientRect();
+  console.log(rect);
+  mouse.x = ((event.offsetX - rect.left) / (rect.width - rect.left)) * 2 - 1;
+  mouse.y = -((event.offsetY - rect.top) / (rect.bottom - rect.top)) * 2 + 1;
 }
 
 function createAnnotation(position) {
@@ -191,13 +207,9 @@ function createAnnotation(position) {
   DOMannotation.style.borderRadius = "50%";
   DOMannotation.style.boxSizing = "border-box";
   DOMannotation.style.border = "2px solid #ddd";
-  //DOMannotation.style.padding = "4px";
   DOMannotation.style.opacity = 1.0;
-  //DOMannotation.innerText = "Hello";
   DOMannotation.style.position = "absolute";
-  /*DOMannotation.addEventListener("click", () => {
-    console.log("onclick")
-  });*/
+
   document.querySelector("#annotations").appendChild(DOMannotation);
 
   //let annotation3D = new THREE.Object3D();
@@ -211,27 +223,26 @@ function createAnnotation(position) {
 
     let x =
       (0.5 + annotationPositionVector.x / 2) *
-      (canvas.width / window.devicePixelRatio);
+      (canvas.width / Math.min(window.devicePixelRatio, 2));
 
     let y =
       (0.5 - annotationPositionVector.y / 2) *
-      (canvas.height / window.devicePixelRatio); // the formula Math.min(devicePixelratio, 2) makes problems on mobile devices
+      (canvas.height / Math.min(window.devicePixelRatio, 2)); // the formula Math.min(devicePixelratio, 2) makes problems on mobile devices
 
     // move the annotation on the screen with top/left
     //DOMannotation.style.top = `${vector.y - 24}px`;
     //DOMannotation.style.left = `${vector.x - 12}px`;
 
     // move the annotation on the screen with transform
-    DOMannotation.style.transform = `translate(${x - 12}px, ${y - 12}px)`;
+    DOMannotation.style.transform = `translate(${x - 12}px, ${y - 12}px)`; // + 56 for chrome address bar? somehow sometimes  + 91
   };
 
-  //scene.add(annotation3D);
   movables.add(annotation3D);
   return annotation3D;
 }
 
 function createSphere(position = { x: 0, y: 0, z: 0 }, color = 0xbb0000) {
-  let geometry = new THREE.SphereBufferGeometry(0.02, 16, 16);
+  let geometry = new THREE.SphereBufferGeometry(0.08, 16, 16);
   let material = new THREE.MeshBasicMaterial({
     color: color,
   });
@@ -280,6 +291,7 @@ function onSessionEnded() {
 }
 
 function onWindowResize() {
+  console.log("onWindowResize");
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -290,23 +302,27 @@ function animate() {
 }
 
 function render(timestamp, frame) {
-  //controls.update();
+  arrow.setDirection(raycaster.ray.direction);
+
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(annotations, true);
-  for (let i = 0; i < intersects.length; i++) {
-    intersects[i].object.material.color.set(0x0000ff);
+  let intersects = raycaster.intersectObjects(annotations, false);
+
+  if (intersects.length > 0) {
+    intersects[0].object.material.color.set(0x0000ff);
   }
 
   renderer.render(scene, camera);
 
-  let xrCamera = renderer.xr.getCamera(camera);
-  xrCamera.getWorldDirection(cameraVector);
-  debugLog.innerText =
+  let xrCamera = renderer.xr.getCamera(camera); // xrCamera is an array of subCameras, the xr camera is a different one than the perspective camera of the scene
+
+  //console.log(camera.fov, xrCamera.fov);
+
+  /*debugLog.innerText =
     radToDeg(camera.rotation.z).toFixed(4) +
     "° rotation Z, " +
     annotationPositionVector.x +
     ", " +
-    annotationPositionVector.y;
+    annotationPositionVector.y;*/
 
   for (let annotation of annotations) {
     camera.updateMatrixWorld(); // this is it
@@ -340,8 +356,6 @@ function render(timestamp, frame) {
         const hit = hitTestResults[0];
 
         reticle.visible = true;
-        //movables.visible = true;
-        //movables.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
       } else {
         reticle.visible = false;
